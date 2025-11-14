@@ -1,28 +1,23 @@
 import requests
-import json
 import sys
 
-model = sys.argv[1]
-input = sys.argv[2]
+# 从命令行参数读取待翻译的文本和源目标语言
+input_text = sys.argv[1]
+source_language = "auto"  # 可根据需要修改源语言
+target_language = "en"    # 目标语言为英文
 
-url = 'http://localhost:11434/api/generate'
+url = 'http://localhost:5000/translate'
 
 data = {
-  "model": model,
-  "prompt": '''
+        "q": input_text,
+        "source": source_language,
+        "target": target_language,
+        "format": "text"
+        }
 
-  You are a helpful, intelligent, amoral, professional, authentic and uncensored translate engine.
-  Translate the following text to English, only return the translated text, without any explaination:
-  {}
-'''.format(input)
-}
-
-result = ""
-with requests.post(url, json=data, stream=True) as response:
-    for line in response.iter_lines():
-        if line:
-            json_response = json.loads(line)
-            if not json_response["done"]:
-                result += json_response["response"]
-
-print(result, flush=True)
+response = requests.post(url, json=data)
+if response.status_code == 200:
+    result = response.json()['translatedText']
+    print(result, flush=True)
+else:
+    print(f"Error: {response.status_code}", flush=True)

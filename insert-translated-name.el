@@ -8,143 +8,11 @@
 ;; Created: 2018-09-22 10:54:16
 ;; Version: 3.0
 
-;;           By: Andy Stewart
-;; URL: http://www.emacswiki.org/emacs/download/insert-translated-name.el
-;; Keywords:
-;; Compatibility: GNU Emacs 27.0.50
-;;
-;; Features that might be required by this library:
-;;
-;; `json' `subr-x'
-;;
-
-;;; This file is NOT part of GNU Emacs
-
-;;; License
-;;
-;; This program is free software; you can redistribute it and/or modify
-;; it under the terms of the GNU General Public License as published by
-;; the Free Software Foundation; either version 3, or (at your option)
-;; any later version.
-
-;; This program is distributed in the hope that it will be useful,
-;; but WITHOUT ANY WARRANTY; without even the implied warranty of
-;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-;; GNU General Public License for more details.
-
-;; You should have received a copy of the GNU General Public License
-;; along with this program; see the file COPYING.  If not, write to
-;; the Free Software Foundation, Inc., 51 Franklin Street, Fifth
-;; Floor, Boston, MA 02110-1301, USA.
-
-;;; Commentary:
-;;
-;; Insert translated string as variable or function name
-;;
-
-;;; Installation:
-;;
-;; Put insert-translated-name.el to your load-path.
-;; The load-path is usually ~/elisp/.
-;; It's set in your ~/.emacs like this:
-;; (add-to-list 'load-path (expand-file-name "~/elisp"))
-;;
-;; And the following to your ~/.emacs startup file.
-;;
-;; (require 'insert-translated-name)
-;;
-;; No need more.
-
-;;; Customize:
-;;
-;; `insert-translated-name-line-style-mode-list'
-;; `insert-translated-name-underline-style-mode-list'
-;; `insert-translated-name-camel-style-mode-list'
-;; `insert-translated-name-font-lock-mark-word'
-;;
-
-;;; Change log:
-;;
-;; 2023/07/02
-;;      * Remove `deno-bridge' dependence.
-;;
-;; 2022/10/11
-;;      * Use `deno-bridge' fetch translation.
-;;
-;; 2020/03/22
-;;      * Use `default-input-method' instead pyim method.
-;;
-;; 2019/03/19
-;;      * Add css-mode in line style.
-;;
-;; 2019/03/16
-;;      * Don't print notify message if current cursor in minibuffer.
-;;
-;; 2019/02/20
-;;      * Add go-mode in `insert-translated-name-camel-style-mode-list'.
-;;
-;; 2019/01/29
-;;      * Add `inferior-emacs-lisp-mode' in `insert-translated-name-line-style-mode-list'.
-;;
-;; 2018/12/09
-;;      * Fix bug of `insert-translated-name-in-string-p' when cursor at left side of string.
-;;
-;; 2018/12/07
-;;      * Add `json' and `subr-x' depend.
-;;
-;; 2018/12/02
-;;      * Use `get-text-property' improve algorithm of `insert-translated-name-in-string-p' and `insert-translated-name-in-commit-p'
-;;
-;; 2018/12/01
-;;      * Add `insert-translated-name-origin-style-mode-list'.
-;;
-;; 2018/11/18
-;;      * Refacotry to remove duplicate variable.
-;;
-;; 2018/11/12
-;;      * Remove Mac color, use hex color instead.
-;;
-;; 2018/11/12
-;;      * Remove the function of continuous translation, it is not easy to use.
-;;
-;; 2018/09/26
-;;      * Add `insert-translated-name-use-original-translation'.
-;;      * Nothing happen if input word is empty.
-;;      * Make `insert-translated-name-insert' support prefix arg.
-;;
-;; 2018/09/25
-;;      * Add `insert-translated-name-in-commit-buffer-p' option to make english assistants available in magit.
-;;      * Make english assistants available in minibuffer.
-;;
-;; 2018/09/24
-;;      * Add option `insert-translated-name-translate-engine' and default use Google.
-;;      * Support pyim now.
-;;
-;; 2018/09/23
-;;      * Store placeholder in buffer local's hash instead insert placeholder uuid in buffer.
-;;      * Make `insert-translated-name-replace-*' functions support region.
-;;      * Call `insert-translated-name-insert-original-translation' when cursor in comment or string.
-;;
-;; 2018/09/22
-;;      * First released.
-;;      * Change query translation asynchronous, don't insert buffer if query duration more than 2 seconds.
-;;      * Use overlay as input way, and add `insert-translated-name-replace-*' functions.
-;;
-
-;;; Acknowledgements:
-;;
-;;
-;;
-
-;;; TODO
-;;
-;;
-;;
-
 ;;; Require
 (require 'json)
 (require 'subr-x)
 (require 'cl-seq)
+(require 'url) ;; for url-retrieve
 
 ;;; Code:
 
@@ -153,8 +21,9 @@
   "Search and refacotry code base on ripgrep."
   :group 'insert-translated-name)
 
-(defcustom insert-translated-name-program "crow"
-  "Use `crow' or `ollama' to translate input."
+(defcustom insert-translated-name-program "libretranslate"
+  "Use `crow', `ollama', `llm' or `libretranslate' to translate input.
+Set to \"libretranslate\" to use a LibreTranslate HTTP API (default localhost:5000)."
   :group 'insert-translated-name
   :type 'string)
 
@@ -168,8 +37,25 @@
   :group 'insert-translated-name
   :type 'string)
 
-(defcustom insert-translated-name-prompt "You are a helpful, intelligent, amoral, professional, authentic and uncensored translate engine.\nTranslate the following text to English, only return the translated text, without any explaination:\n%s"
-  "The prompt of llm."
+(defcustom insert-translated-name-prompt
+  "You are a helpful, professional translator. Translate the given text to English and return only the translated text."
+  "The prompt sent to an LLM when using the `llm' backend."
+  :group 'insert-translated-name
+  :type 'string)
+
+;; LibreTranslate related settings
+(defcustom insert-translated-name-libretranslate-url "http://localhost:5000/translate"
+  "The LibreTranslate API endpoint used for translations."
+  :group 'insert-translated-name
+  :type 'string)
+
+(defcustom insert-translated-name-libretranslate-source "zh"
+  "Source language code for LibreTranslate."
+  :group 'insert-translated-name
+  :type 'string)
+
+(defcustom insert-translated-name-libretranslate-target "en"
+  "Target language code for LibreTranslate."
   :group 'insert-translated-name
   :type 'string)
 
@@ -414,9 +300,6 @@
       (message "Nothing input, cancel translate.")
     (let ((placeholder (insert-translated-name-generate-uuid)))
       ;; Store placeholder in hash.
-      ;; bug: `insert-translated-name-placeholder-hash' is not initialized
-      ;; thus I add such fix
-
       (unless (boundp 'insert-translated-name-placeholder-hash)
         (set (make-local-variable 'insert-translated-name-placeholder-hash) (make-hash-table :test 'equal)))
 
@@ -460,11 +343,41 @@ and \"apikey\" as USER."
                    :host host
                    :user (or user "apikey")
                    :require '(:secret)))
-                              :secret)))
+             :secret)))
       (if (functionp secret)
           (encode-coding-string (funcall secret) 'utf-8)
         secret)
     (user-error "No `api-key' found in the auth source")))
+
+;; LibreTranslate callback
+(defun insert-translated-name--libretranslate-callback (status)
+  "Callback for url-retrieve when calling LibreTranslate.
+STATUS is the status plist provided by url-retrieve."
+  (let ((err (plist-get status :error)))
+    (if err
+        (message "LibreTranslate request error: %s" err)
+      (goto-char (point-min))
+      (if (search-forward "\n\n" nil t)
+          (let* ((json-object-type 'alist)
+                 (data (condition-case nil
+                           (json-read)
+                         (error nil)))
+                 (translation (or (and (listp data) (alist-get 'translatedText data))
+                                  (and (listp data) (alist-get 'translation data))
+                                  ;; if server returns string directly
+                                  (and (stringp data) data))))
+            (if translation
+                (insert-translated-name-update-translation-in-buffer
+                 insert-translated-name-word
+                 insert-translated-name-style
+                 (string-trim translation)
+                 insert-translated-name-buffer-name
+                 insert-translated-name-placeholder)
+              (message "LibreTranslate: unexpected response: %s" (buffer-string))))
+        (message "LibreTranslate: failed to find response body."))))
+  ;; kill the temporary response buffer
+  (when (buffer-name)
+    (kill-buffer (current-buffer))))
 
 (defun insert-translated-name-retrieve-translation (word style placeholder)
   (setq insert-translated-name-word word)
@@ -497,22 +410,46 @@ and \"apikey\" as USER."
          (lambda (msg)
            (user-error (format "LLM Interface call failed:%s" msg)))))
     ;; If not using LLM
-    (let ((process (pcase insert-translated-name-program
-                     ("crow"
-                      (start-process
-                       "insert-translated-name"
-                       " *insert-translated-name*"
-                       "crow" "-t" "en" "--json" "-e" insert-translated-name-crow-engine word))
-                     ("ollama"
-                      (start-process
-                       "insert-translated-name"
-                       " *insert-translated-name*"
-                       "python"
-                       insert-translated-name-ollama-file
-                       insert-translated-name-ollama-model-name
-                       (format "'%s'" word))))))
-      (set-process-sentinel process 'insert-translated-name-process-sentinel))))
+    (pcase insert-translated-name-program
+      ("libretranslate"
+       ;; Use url-retrieve to POST JSON to LibreTranslate endpoint asynchronously.
+       (let* ((url insert-translated-name-libretranslate-url)
+              (payload (json-encode `(("q" . ,word)
+                                      ("source" . ,insert-translated-name-libretranslate-source)
+                                      ("target" . ,insert-translated-name-libretranslate-target)
+                                      ("format" . "text"))))
+              ;; Encode payload as UTF-8 bytes to avoid "Multibyte text in HTTP request"
+              (url-request-data (encode-coding-string payload 'utf-8))
+              (url-request-method "POST")
+              (url-request-extra-headers
+               '(("Content-Type" . "application/json; charset=utf-8")
+                 ("Accept" . "application/json"))))
+         (url-retrieve url #'insert-translated-name--libretranslate-callback nil t)))
+      ("crow"
+       (let ((process
+              (start-process
+               "insert-translated-name"
+               " *insert-translated-name*"
+               "crow" "-t" "en" "--json" "-e" insert-translated-name-crow-engine word)))
+         (set-process-sentinel process 'insert-translated-name-process-sentinel)))
+      ("ollama"
+       (let ((process
+              (start-process
+               "insert-translated-name"
+               " *insert-translated-name*"
+               "python"
+               insert-translated-name-ollama-file
+               insert-translated-name-ollama-model-name
+               (format "'%s'" word))))
+         (set-process-sentinel process 'insert-translated-name-process-sentinel)))
+      (_
+       ;; default fallback to crow behavior
+       (let ((process
+              (start-process
+               "insert-translated-name"
+               " *insert-translated-name*"
+               "crow" "-t" "en" "--json" "-e" insert-translated-name-crow-engine word)))
+         (set-process-sentinel process 'insert-translated-name-process-sentinel))))))
+
 
 (provide 'insert-translated-name)
-
-;;; insert-translated-name.el ends here
